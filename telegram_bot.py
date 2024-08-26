@@ -1,8 +1,6 @@
 import os
 import re
 import random
-from flask import Flask, request
-from threading import Thread
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, filters, ConversationHandler, ContextTypes
@@ -14,27 +12,6 @@ ASK_NAME, ASK_PHONE, ASK_INSTAGRAM, ASK_FACEBOOK, ASK_CAPTCHA = range(5)
 # Получаем значения переменных окружения
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROUP_ID = os.getenv("CHAT_ID")
-
-# Создание Flask-сервера
-flask_app = Flask('')
-
-@flask_app.route('/')
-def home():
-    return "Bot is running"
-
-@flask_app.route(f'/{TOKEN}', methods=['POST'])
-def webhook():
-    json_str = request.get_data(as_text=True)
-    update = Update.de_json(json_str, telegram_app.bot)
-    telegram_app.process_update(update)
-    return 'ok'
-
-def run():
-    flask_app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Привет! Пожалуйста, введите ваше имя и фамилию:")
@@ -117,10 +94,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 def main():
-    keep_alive()  # Запуск Flask-сервера
-
-    global telegram_app
-    telegram_app = ApplicationBuilder().token(TOKEN).build()
+    # Создание приложения с использованием токена из переменных окружения
+    app = ApplicationBuilder().token(TOKEN).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
@@ -134,13 +109,9 @@ def main():
         fallbacks=[CommandHandler('cancel', cancel)],
     )
 
-    telegram_app.add_handler(conv_handler)
-    telegram_app.run_webhook(
-        listen='0.0.0.0',
-        port=8080,
-        url_path=TOKEN,
-        webhook_url=f'https://<your-project-name>.railway.app/{TOKEN}'
-    )
+    app.add_handler(conv_handler)
+
+    app.run_polling()
 
 if __name__ == '__main__':
     main()
