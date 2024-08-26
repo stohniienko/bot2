@@ -1,23 +1,28 @@
-import os
 import re
 import random
+import os
+from flask import Flask, request
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, filters, ConversationHandler, ContextTypes
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackContext
 
-# Шаги для ConversationHandler
+# Переменные окружения
+TOKEN = os.getenv('TELEGRAM_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
+PORT = int(os.getenv('PORT', 5000))
+
+app = Flask(__name__)
+
+# Состояния разговора
 ASK_NAME, ASK_PHONE, ASK_INSTAGRAM, ASK_FACEBOOK, ASK_CAPTCHA = range(5)
 
-# Получаем значения переменных окружения
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-GROUP_ID = os.getenv("CHAT_ID")
+# Инициализация бота
+application = Application.builder().token(TOKEN).build()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def start(update: Update, context: CallbackContext) -> int:
     await update.message.reply_text("Привет! Пожалуйста, введите ваше имя и фамилию:")
     return ASK_NAME
 
-async def ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def ask_name(update: Update, context: CallbackContext) -> int:
     context.user_data['name'] = update.message.text
 
     if len(context.user_data['name'].split()) < 2:
@@ -27,7 +32,7 @@ async def ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Спасибо! Теперь введите ваш номер телефона в международном формате (например, +380123456789):")
     return ASK_PHONE
 
-async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def ask_phone(update: Update, context: CallbackContext) -> int:
     phone = update.message.text
 
     if not re.match(r"^\+\d{10,15}$", phone):
@@ -38,7 +43,7 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Отлично! Теперь введите ваш ник в Instagram (например, @username):")
     return ASK_INSTAGRAM
 
-async def ask_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def ask_instagram(update: Update, context: CallbackContext) -> int:
     instagram_nick = update.message.text
 
     if not re.match(r"^@\w{5,}$", instagram_nick):
@@ -49,7 +54,7 @@ async def ask_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     await update.message.reply_text("Теперь введите ваш ник на Facebook (например, facebook.com/username):")
     return ASK_FACEBOOK
 
-async def ask_facebook(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def ask_facebook(update: Update, context: CallbackContext) -> int:
     facebook_nick = update.message.text
 
     if not re.match(r"^facebook\.com/\w+$", facebook_nick):
@@ -58,60 +63,50 @@ async def ask_facebook(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     context.user_data['facebook'] = facebook_nick
 
-    # Генерация капчи (случайная простая математическая задача)
-    num1 = random.randint(1, 10)
-    num2 = random.randint(1, 10)
-    context.user_data['captcha'] = num1 + num2
-    await update.message.reply_text(f"Для подтверждения, решите задачу: {num1} + {num2} = ?")
+    # Отправка капчи
+    a = random.randint(1, 9)
+    b = random.randint(1, 9)
+    context.user_data['captcha'] = a + b
+    await update.message.reply_text(f'Решите капчу: {a} + {b} = ?')
     return ASK_CAPTCHA
 
-async def ask_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    answer = int(update.message.text)
-    correct_answer = context.user_data.get('captcha')
-
-    if answer != correct_answer:
-        await update.message.reply_text("Неправильный ответ. Попробуйте еще раз.")
+async def check_captcha(update: Update, context: CallbackContext) -> int:
+    try:
+        user_captcha = int(update.message.text)
+    except ValueError:
+        await update.message.reply_text("Пожалуйста, введите число для капчи.")
         return ASK_CAPTCHA
 
-    user_data = context.user_data
+    if user_captcha == context.user_data['captcha']:
+        # Отправка данных в указанный чат
+        message = (f"Имя: {context.user_data['name']}\n"
+                   f"Телефон: {context.user_data['phone']}\n"
+                   f"Instagram: {context.user_data['instagram']}\n"
+                   f"Facebook: {context.user_data['facebook']}")
+        await application.bot.send_message(chat_id=CHAT_ID, text=message)
+        await update.message.reply_text('Спасибо! Ваши данные отправлены.')
+        return ConversationHandler.END
+    else:
+        await update.message.reply_text('Неверный ответ на капчу. Попробуйте снова.')
+        return ASK_CAPTCHA
 
-    await context.bot.send_message(
-        chat_id=GROUP_ID,
-        text=(
-            f"Новые данные от пользователя:\n"
-            f"Имя и фамилия: {user_data['name']}\n"
-            f"Телефон: {user_data['phone']}\n"
-            f"Instagram: {user_data['instagram']}\n"
-            f"Facebook: {user_data['facebook']}"
-        )
-    )
-
-    await update.message.reply_text("Спасибо! Ваши данные были отправлены.")
+async def cancel(update: Update, context: CallbackContext) -> int:
+    await update.message.reply_text('Отмена.')
     return ConversationHandler.END
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text('Отмена. Если захотите начать снова, введите /start.')
-    return ConversationHandler.END
+# Настройка маршрутизации
+@app.route('/' + TOKEN, methods=['POST'])
+async def webhook():
+    json_update = request.get_json()
+    update = Update.de_json(json_update, application.bot)
+    await application.process_update(update)
+    return 'ok'
 
-def main():
-    # Создание приложения с использованием токена из переменных окружения
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name)],
-            ASK_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_phone)],
-            ASK_INSTAGRAM: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_instagram)],
-            ASK_FACEBOOK: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_facebook)],
-            ASK_CAPTCHA: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_captcha)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)],
-    )
-
-    app.add_handler(conv_handler)
-
-    app.run_polling()
+# Установка вебхука
+def set_webhook():
+    webhook_url = f'https://{os.getenv("HEROKU_APP_NAME")}.herokuapp.com/{TOKEN}'
+    application.bot.set_webhook(url=webhook_url)
 
 if __name__ == '__main__':
-    main()
+    set_webhook()
+    app.run(host='0.0.0.0', port=PORT)
