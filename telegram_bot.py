@@ -5,8 +5,6 @@ from telegram import Update
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 )
-from flask import Flask
-from threading import Thread
 
 # Шаги для ConversationHandler
 ASK_NAME, ASK_PHONE, ASK_INSTAGRAM, ASK_FACEBOOK, ASK_CAPTCHA = range(5)
@@ -14,20 +12,6 @@ ASK_NAME, ASK_PHONE, ASK_INSTAGRAM, ASK_FACEBOOK, ASK_CAPTCHA = range(5)
 # Получаем значения переменных окружения
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROUP_ID = os.getenv("CHAT_ID")
-
-# Создание Flask-сервера
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is running"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Привет! Пожалуйста, введите ваше имя и фамилию:")
@@ -110,9 +94,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 def main():
-    keep_alive()  # Запуск Flask-сервера
     # Создание приложения с использованием токена из переменных окружения
-    application = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
@@ -126,8 +109,9 @@ def main():
         fallbacks=[CommandHandler('cancel', cancel)],
     )
 
-    application.add_handler(conv_handler)
-    application.run_polling()
+    app.add_handler(conv_handler)
+
+    app.run_polling()
 
 if __name__ == '__main__':
     main()
