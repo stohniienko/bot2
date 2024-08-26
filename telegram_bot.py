@@ -1,23 +1,20 @@
-import re
-import random
-import os
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackContext
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+import os
+import re
 
-# Переменные окружения
-TOKEN = os.getenv('TELEGRAM_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
-PORT = int(os.getenv('PORT', 5000))
+# Настройки
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
+# Инициализация Flask
 app = Flask(__name__)
 
-# Состояния разговора
-ASK_NAME, ASK_PHONE, ASK_INSTAGRAM, ASK_FACEBOOK, ASK_CAPTCHA = range(5)
+# Инициализация Telegram Application
+application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-# Инициализация бота
-application = Application.builder().token(TOKEN).build()
-
+# Обработчики команд и сообщений
 async def start(update: Update, context: CallbackContext) -> int:
     await update.message.reply_text("Привет! Пожалуйста, введите ваше имя и фамилию:")
     return ASK_NAME
@@ -62,51 +59,23 @@ async def ask_facebook(update: Update, context: CallbackContext) -> int:
         return ASK_FACEBOOK
 
     context.user_data['facebook'] = facebook_nick
-
-    # Отправка капчи
-    a = random.randint(1, 9)
-    b = random.randint(1, 9)
-    context.user_data['captcha'] = a + b
-    await update.message.reply_text(f'Решите капчу: {a} + {b} = ?')
-    return ASK_CAPTCHA
-
-async def check_captcha(update: Update, context: CallbackContext) -> int:
-    try:
-        user_captcha = int(update.message.text)
-    except ValueError:
-        await update.message.reply_text("Пожалуйста, введите число для капчи.")
-        return ASK_CAPTCHA
-
-    if user_captcha == context.user_data['captcha']:
-        # Отправка данных в указанный чат
-        message = (f"Имя: {context.user_data['name']}\n"
-                   f"Телефон: {context.user_data['phone']}\n"
-                   f"Instagram: {context.user_data['instagram']}\n"
-                   f"Facebook: {context.user_data['facebook']}")
-        await application.bot.send_message(chat_id=CHAT_ID, text=message)
-        await update.message.reply_text('Спасибо! Ваши данные отправлены.')
-        return ConversationHandler.END
-    else:
-        await update.message.reply_text('Неверный ответ на капчу. Попробуйте снова.')
-        return ASK_CAPTCHA
-
-async def cancel(update: Update, context: CallbackContext) -> int:
-    await update.message.reply_text('Отмена.')
+    await update.message.reply_text("Спасибо! Ваши данные успешно сохранены.")
     return ConversationHandler.END
 
-# Настройка маршрутизации
-@app.route('/' + TOKEN, methods=['POST'])
+# Функция обработки вебхука
+@app.route('/webhook', methods=['POST'])
 async def webhook():
     json_update = request.get_json()
     update = Update.de_json(json_update, application.bot)
     await application.process_update(update)
-    return 'ok'
+    return '', 200
 
 # Установка вебхука
-def set_webhook():
-    webhook_url = f'https://{os.getenv("HEROKU_APP_NAME")}.herokuapp.com/{TOKEN}'
-    application.bot.set_webhook(url=webhook_url)
+async def set_webhook():
+    await application.bot.set_webhook(url=WEBHOOK_URL)
 
 if __name__ == '__main__':
-    set_webhook()
-    app.run(host='0.0.0.0', port=PORT)
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(set_webhook())
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 9686)))
